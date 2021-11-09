@@ -14,16 +14,16 @@ When it has findings it will create a json file per repo detailing it's findings
 Here's how you use it:
 
 ### Lazy individual
-`./TruffleHogOnRepos.ps1 -CompanyName Amazon`
+`./TruffleHogOnRepos.ps1 -CompanyName aws`
 
 It will run in the folder you are currently in. This will create a subfolder called trufflehogOutput where the results will be dropped.
 
 ### Less lazy individual
-`./TruffleHogOnRepos.ps1 -CompanyName Amazon -Path ./amazon-git`
+`./TruffleHogOnRepos.ps1 -CompanyName aws -Path ./amazon-git`
 
 It will run in the folder you've specified. This will create a subfolder called trufflehogOutput where the results will be dropped.
 
 ### Hard working individual
-`./TruffleHogOnRepos.ps1 -CompanyName Amazon -Path ./amazon-git -OutputPath ./amazon-git/output`
+`./TruffleHogOnRepos.ps1 -CompanyName aws -Path ./amazon-git -OutputPath ./amazon-git/output`
 
 It will run in the folder you've specified with the output folder you've specified. 
