@@ -27,3 +27,8 @@ It will run in the folder you've specified. This will create a subfolder called 
 `./TruffleHogOnRepos.ps1 -CompanyName aws -Path ./amazon-git -OutputPath ./amazon-git/output`
 
 It will run in the folder you've specified with the output folder you've specified. 
+
+### Running it on a local set of repositories
+`./TruffleHogOnRepos.ps1 -Path ./amazon-git`
+
+See the ommitted `-CompanyName`, it will now skip the cloning of repos and go directly into scanning the folders in the given `-Path`
