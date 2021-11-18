@@ -16,23 +16,32 @@
     The path of the repo(s) you want to scan
 .PARAMETER OutputPath
     The path where the output will be dropped
+.PARAMETER NoRecurse
+    The path where the output will be dropped
 #>
 
 param (
     [string]$CompanyName,
     [string]$Path,
-    [string]$OutputPath
+    [string]$OutputPath,
+    [switch]$NoRecurse
 )
-if(!$CompanyName -and !$Path){
+
+if (!$CompanyName -and !$Path) {
     Write-Error "You did not supply a path or a GitHub Company to scan" -RecommendedAction "Please either use the -CompanyName or the -Path variable"
 }
 
 if (!$Path) {
     $Path = Get-Location
 }
-if (!$OutputPath) {
-    $OutputPath = "$Path\truffleHogOutput"
+else {
+    $Path = Resolve-Path $Path
 }
+
+if (!$OutputPath) {
+    $OutputPath = Join-Path $Path -ChildPath "truffleHogOutput"
+}
+
 $OutputPathExists = Test-Path $OutputPath
 if (!$OutputPathExists) {
     New-Item -Path $OutputPath -ItemType Directory
@@ -93,9 +102,8 @@ function GetAllReposFromCompany() {
 
 function CloneRepos {
     param ($repos)
-
-    $count = $repos.Count
-    Write-Output "Starting cloning $count repositories"
+    
+    Write-Output "Starting cloning $($repos.Count) repositories"
     $outArray = Split-Array $repos 6
 
     foreach ($repo in $outArray) {
@@ -129,30 +137,57 @@ function RunTruffleHogJob {
     param ([array]$folders)
 
     $scriptBlock = {
-        param($dir, $Path, $OutputPath) 
-        $dirName = $dir.Name;
+        param($dir, $Path, $OutputPath, $NoRecurse) 
         
-        Write-Output "Running TruffleHog on: $dirName"
-        $fullPath = "$Path\$dirname";
+        Write-Output "Running TruffleHog on: $dir"
+        if($NoRecurse){
+            $fullPath = $Path
+        }else{
+            $fullPath = Join-Path -Path $Path -ChildPath $dir
+        }
+               
+        $OutputJsonPath = Join-Path -Path $OutputPath -ChildPath "$dir.json"
+        $OutputErrorPath = Join-Path -Path $OutputPath -ChildPath "error.log"
         try {
-            trufflehog --json $fullPath > "$OutputPath\$dirName.json" 2> "$OutputPath\error.log"
+            trufflehog --json $fullPath > $OutputJsonPath 2> $OutputErrorPath
         }
         catch {
-            $_
+            Write-Error $_
         }
     } 
 
     $folders | ForEach-Object {
         # pass the loop variable across the job-context barrier
-        Start-Job $scriptBlock -ArgumentList $_, $Path, $OutputPath -Name "TH_$_"
+        Start-Job $scriptBlock -ArgumentList $_, $Path, $OutputPath, $NoRecurse -Name "TH_$_"
     }
     # Wait for all to complete
     While (Get-Job -State "Running") { Start-Sleep 2 }
 }
 
 function RunTruffleHog() {
-    $folders = Get-ChildItem $Path -Directory
-    $count = $folders.Count
+    if (!$CompanyName) {
+        # We haven't cloned repos, looking for it on disk
+        if ($NoRecurse) {
+            Write-Host "Detecting git repositories in $($Path)"
+            $ContainsGitRepo = $(Get-ChildItem $Path -Attributes Directory+Hidden -ErrorAction SilentlyContinue -Filter ".git").Count -gt 0
+            if($ContainsGitRepo){
+                $folders = @($(Split-Path $Path -Leaf))
+            }
+        }
+        else {
+            Write-Host "Detecting git repositories in $($Path) recursively"
+            $folders = Get-ChildItem $Path -Attributes Directory+Hidden -ErrorAction SilentlyContinue -Filter ".git" -Recurse -Depth 1 | ForEach-Object { $_.Parent.Name }
+        }
+    }
+    else {
+        $folders = Get-ChildItem $Path -Directory
+    }
+
+    if($folders.Count -lt 1){
+        Write-Error "No git repositories found"
+        return
+    }
+
     Write-Output "Running trufflehog on $($folders.Count) folders"
 
     $arraysOfDirectories = Split-Array $folders 6
@@ -161,6 +196,9 @@ function RunTruffleHog() {
         # run the jobs to let trufflehog scan the repo
         RunTruffleHogJob $dirs
     }
+
+    Write-Host "Cleaning up background jobs from this session"
+    Remove-Job *
 
     $createdFiles = Get-ChildItem $OutputPath -File -Filter *.json
     $emptyFiles = $createdFiles | Where-Object Length -lt 1Kb 
@@ -172,15 +210,17 @@ function RunTruffleHog() {
     
     Write-Host "Created output in the files below:" -ForegroundColor Yellow
     
-    if($nonEmptyFiles.Count -gt 0){
-        Write-Host "Found possible secrets in $($nonEmptyFiles.Count) files" -ForegroundColor Green
+    if ($nonEmptyFiles.Count -gt 0) {
+        Write-Host "Found possible secrets and outputted it in $($nonEmptyFiles.Count) files:" -ForegroundColor Green
         Write-Host $nonEmptyfiles | Format-Table -Property Name, LastWriteTime, Length
-    }else{
+    }
+    else {
         Write-Host "Found no possible secrets" -ForegroundColor Yellow
     }
 }
 
 $banner = @"
+
 _______                ___   ___  __         _______                   
 |_     _|.----..--.--..'  _|.'  _||  |.-----.|   |   |.-----..-----.    
   |   |  |   _||  |  ||   _||   _||  ||  -__||       ||  _  ||  _  |    
@@ -196,13 +236,15 @@ _______                ___   ___  __         _______
             |      <|  -__||  _  ||  _  ||__ --|                        
             |___|__||_____||   __||_____||_____|                        
                            |__|                                         
+
+
 "@
 
 Write-Host $banner -ForegroundColor Yellow
 
-if($CompanyName){
+if ($CompanyName) {
     Write-Host "CompanyName is set to $CompanyName" -ForegroundColor Yellow
-    Write-Host "Going to clone repositories to $Path" -ForegroundColor Yellow
+    Write-Host "Going to clone repositories to $($Path | Select-Object FullName)" -ForegroundColor Yellow
     $cloneUrls = GetAllReposFromCompany $CompanyName
 
     CloneRepos $cloneUrls
